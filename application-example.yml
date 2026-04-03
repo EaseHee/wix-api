@@ -1,0 +1,90 @@
+# =============================================================================
+# Wix API Client — Spring Boot 설정 예시
+# =============================================================================
+# 이 파일을 프로젝트의 src/main/resources/application.yml 에 병합하거나,
+# application-wix.yml 로 복사하여 프로파일로 사용.
+#
+# 프로파일 활성화: spring.profiles.active=wix
+# =============================================================================
+
+wix:
+  api:
+    # -------------------------------------------------------------------------
+    # [필수] 인증 정보
+    # -------------------------------------------------------------------------
+
+    # Wix API Key (환경 변수 또는 직접 입력)
+    # 발급: https://manage.wix.com/account/api-keys
+    api-key: ${WIX_API_KEY}
+
+    # Site ID 또는 Account ID 중 하나 필수
+    # Site ID: 개별 사이트 단위 접근
+    site-id: ${WIX_SITE_ID}
+
+    # Account ID: 계정 전체 단위 접근 (site-id 대신 사용 가능)
+    # account-id: ${WIX_ACCOUNT_ID}
+
+    # -------------------------------------------------------------------------
+    # [선택] HTTP 설정
+    # -------------------------------------------------------------------------
+
+    # Wix API Base URL
+    # base-url: https://www.wixapis.com
+
+    # 연결 타임아웃 (초)
+    # connect-timeout-seconds: 10
+
+    # 읽기 타임아웃 (초)
+    # read-timeout-seconds: 30
+
+    # -------------------------------------------------------------------------
+    # [선택] 재시도 설정
+    # -------------------------------------------------------------------------
+
+    # 최대 재시도 횟수 (HTTP 429, 5xx 에러 시)
+    # max-retries: 3
+
+    # 첫 재시도 대기 시간 (밀리초)
+    # initial-retry-delay-ms: 1000
+
+    # 재시도 대기 시간 배수 (지수 백오프)
+    # retry-multiplier: 2.0
+
+    # 최대 재시도 대기 시간 (밀리초)
+    # max-retry-delay-ms: 60000
+
+# =============================================================================
+# 사용 예시 — ERP 프로젝트의 application.yml 에 추가
+# =============================================================================
+#
+# 1. build.gradle에 의존성 추가:
+#    implementation 'com.wix.api:wix-api-client:0.1.0'
+#
+# 2. 환경 변수 설정:
+#    export WIX_API_KEY=IST.xxx...
+#    export WIX_SITE_ID=abc-123-def-456
+#
+# 3. WixClient 빈 주입:
+#    @Service
+#    @RequiredArgsConstructor
+#    public class WixSyncService {
+#        private final WixClient wixClient;
+#
+#        public void syncContacts() {
+#            ContactList contacts = wixClient.contacts()
+#                .listContacts(PagingRequest.builder().limit(100).build());
+#            // ERP 데이터베이스에 동기화 ...
+#        }
+#
+#        public void syncAnalytics() {
+#            QueryStatisticsResponse stats = wixClient.analytics()
+#                .queryStatistics(QueryStatisticsRequest.builder()
+#                    .dateRange(QueryStatisticsRequest.DateRange.builder()
+#                        .from("2026-03-01").to("2026-03-31").build())
+#                    .metrics(List.of("SESSIONS", "UNIQUE_VISITORS", "SALES"))
+#                    .dimensions(List.of("DATE"))
+#                    .build());
+#            // 통계 데이터 처리 ...
+#        }
+#    }
+# =============================================================================

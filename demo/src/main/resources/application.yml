@@ -1,0 +1,7 @@
+server:
+  port: 8080
+
+wix:
+  defaults:
+    api-key: ${WIX_API_KEY:}
+    site-id: ${WIX_SITE_ID:}
