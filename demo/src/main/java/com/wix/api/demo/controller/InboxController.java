@@ -1,9 +1,7 @@
 package com.wix.api.demo.controller;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 import com.wix.api.WixClient;
@@ -11,7 +9,9 @@ import com.wix.api.common.CursorPagingRequest;
 import com.wix.api.common.PagingRequest;
 import com.wix.api.demo.WixClientProvider;
 import com.wix.api.module.contacts.dto.Contact;
+import com.wix.api.module.contacts.dto.ContactInfo;
 import com.wix.api.module.contacts.dto.ContactList;
+import com.wix.api.module.contacts.dto.QueryContactsRequest;
 import com.wix.api.module.inbox.dto.*;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -25,15 +25,12 @@ public class InboxController {
 
     private static final Logger log = LoggerFactory.getLogger(InboxController.class);
     private final WixClientProvider provider;
-    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+    // 병렬 스레드를 줄여 rate limit 회피 (10 → 5)
+    private final ExecutorService executor = Executors.newFixedThreadPool(5);
 
     /**
-     * 대화 목록: 연락처 기반으로 대화를 발견하고, 최근 메시지 포함하여 반환.
-     * visibility=BUSINESS → BASIC, MINIMAL, FORM, SYSTEM 등 모든 유형 포함.
-     */
-    /**
-     * 전체 연락처를 페이지별로 순회하여 대화(메시지 있는 것)를 수집.
-     * scanPages: 순회할 페이지 수 (각 100건), 최신 메시지 날짜 내림차순 정렬.
+     * 대화 목록: 연락처를 lastActivity 내림차순으로 조회하여 최근 활동 순으로 반환.
+     * 에러 발생 시 errors 필드에 실패 사유를 보고하여 누락 원인 추적 가능.
      */
     @GetMapping("/conversations")
     public Map<String, Object> listConversations(
@@ -43,12 +40,16 @@ public class InboxController {
         WixClient wix = provider.get(apiKey, siteId);
 
         List<Map<String, Object>> allConversations = new ArrayList<>();
+        List<Map<String, Object>> errors = new ArrayList<>();
         int pageSize = 100;
         int totalContacts = 0;
 
         for (int page = 0; page < scanPages; page++) {
-            ContactList contactList = wix.contacts().listContacts(
-                    PagingRequest.builder().limit(pageSize).offset(page * pageSize).build());
+            ContactList contactList = wix.contacts().queryContacts(
+                    QueryContactsRequest.builder()
+                            .sort(List.of(Map.of("fieldName", "createdDate", "order", "DESC")))
+                            .paging(PagingRequest.builder().limit(pageSize).offset(page * pageSize).build())
+                            .build());
             if (contactList.getContacts() == null || contactList.getContacts().isEmpty()) break;
 
             if (page == 0 && contactList.getPagingMetadata() != null) {
@@ -56,19 +57,25 @@ public class InboxController {
                 if (t != null) totalContacts = t;
             }
 
-            List<CompletableFuture<Map<String, Object>>> futures = contactList.getContacts().stream()
+            List<CompletableFuture<BuildResult>> futures = contactList.getContacts().stream()
                     .map(contact -> CompletableFuture.supplyAsync(
-                            () -> buildSummary(wix, contact), executor))
+                            () -> buildSummaryWithDiag(wix, contact), executor))
                     .toList();
 
             Set<String> seenIds = allConversations.stream()
                     .map(c -> (String) c.get("conversationId"))
                     .collect(Collectors.toSet());
-            futures.stream()
-                    .map(CompletableFuture::join)
-                    .filter(Objects::nonNull)
-                    .filter(c -> seenIds.add((String) c.get("conversationId"))) // 중복 제거
-                    .forEach(allConversations::add);
+
+            for (CompletableFuture<BuildResult> future : futures) {
+                BuildResult result = future.join();
+                if (result.summary != null) {
+                    if (seenIds.add((String) result.summary.get("conversationId"))) {
+                        allConversations.add(result.summary);
+                    }
+                } else if (result.error != null) {
+                    errors.add(result.error);
+                }
+            }
 
             if (!contactList.getPagingMetadata().isHasNext()) break;
         }
@@ -83,26 +90,203 @@ public class InboxController {
 
         long activeCount = allConversations.stream().filter(c -> (boolean) c.get("hasMessages")).count();
 
-        return Map.of(
-                "conversations", allConversations,
-                "activeCount", activeCount,
-                "totalScanned", Math.min(scanPages * pageSize, totalContacts),
-                "totalContacts", totalContacts
-        );
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("conversations", allConversations);
+        response.put("activeCount", activeCount);
+        response.put("totalScanned", Math.min(scanPages * pageSize, totalContacts));
+        response.put("totalContacts", totalContacts);
+        if (!errors.isEmpty()) {
+            response.put("errors", errors);
+            response.put("errorCount", errors.size());
+        }
+        return response;
     }
 
     /**
-     * 대화의 메시지 목록: 모든 유형 (BASIC, MINIMAL, FORM, TEMPLATE, SYSTEM) 포함.
+     * 특정 연락처의 대화 조회를 진단.
+     * conversation 존재 여부, 메시지 유무, visibility별 메시지 수를 확인.
      */
+    @GetMapping("/diagnose/{contactId}")
+    public Map<String, Object> diagnoseContact(
+            @RequestHeader(value = "X-Wix-Api-Key", required = false) String apiKey,
+            @RequestHeader(value = "X-Wix-Site-Id", required = false) String siteId,
+            @PathVariable String contactId) {
+        WixClient wix = provider.get(apiKey, siteId);
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        // 1. Contact 존재 확인
+        try {
+            Contact contact = wix.contacts().getContact(contactId);
+            if (contact != null) {
+                result.put("contactExists", true);
+                result.put("contactName", extractName(contact));
+                result.put("contactCreatedDate", contact.getCreatedDate());
+                result.put("contactLastActivity", contact.getLastActivity());
+                result.put("contactSource", contact.getSource());
+            } else {
+                result.put("contactExists", false);
+            }
+        } catch (Exception e) {
+            result.put("contactExists", false);
+            result.put("contactError", e.getMessage());
+        }
+
+        // 2. Conversation 조회
+        try {
+            Conversation conv = wix.inbox().getOrCreateConversation(contactId);
+            if (conv != null && conv.getId() != null) {
+                result.put("conversationExists", true);
+                result.put("conversationId", conv.getId());
+                result.put("conversationChannels", conv.getChannels());
+                result.put("conversationCreatedDate", conv.getCreatedDate());
+                result.put("participant", conv.getParticipant());
+
+                // 3. visibility별 메시지 수 비교
+                for (String visibility : List.of("BUSINESS", "BUSINESS_AND_PARTICIPANT")) {
+                    try {
+                        MessageList ml = wix.inbox().listMessages(
+                                conv.getId(), visibility,
+                                CursorPagingRequest.builder().limit(5).build());
+                        int count = (ml != null && ml.getMessages() != null) ? ml.getMessages().size() : 0;
+                        boolean hasMore = ml != null && ml.getPagingMetadata() != null
+                                && ml.getPagingMetadata().getCursors() != null
+                                && ml.getPagingMetadata().getCursors().getNext() != null;
+
+                        Map<String, Object> visResult = new LinkedHashMap<>();
+                        visResult.put("messageCount", hasMore ? count + "+" : String.valueOf(count));
+                        if (count > 0) {
+                            List<Map<String, Object>> msgSummaries = new ArrayList<>();
+                            for (Message msg : ml.getMessages()) {
+                                Map<String, Object> ms = new LinkedHashMap<>();
+                                ms.put("id", msg.getId());
+                                ms.put("direction", msg.getDirection());
+                                ms.put("contentType", msg.getContent() != null
+                                        ? msg.getContent().getOrDefault("contentType", "UNKNOWN") : "UNKNOWN");
+                                ms.put("previewText", msg.getContent() != null
+                                        ? msg.getContent().getOrDefault("previewText", "") : "");
+                                ms.put("createdDate", msg.getCreatedDate());
+                                ms.put("visibility", msg.getVisibility());
+                                ms.put("sourceChannel", msg.getSourceChannel());
+                                msgSummaries.add(ms);
+                            }
+                            visResult.put("messages", msgSummaries);
+                        }
+                        result.put("visibility_" + visibility, visResult);
+                    } catch (Exception e) {
+                        result.put("visibility_" + visibility + "_error", e.getMessage());
+                    }
+                }
+            } else {
+                result.put("conversationExists", false);
+            }
+        } catch (Exception e) {
+            result.put("conversationExists", false);
+            result.put("conversationError", e.getMessage());
+        }
+
+        return result;
+    }
+
     /**
-     * 대화 상세: conversation 메타 + contact 상세 + 최근 메시지를 통합 조회.
+     * conversationId로 직접 진단: conversation 조회, 메시지 조회, 에러 상세 보고.
+     * 여러 conversationId를 콤마로 구분하여 일괄 비교 가능.
+     * 예: /api/inbox/diagnose/conversations?ids=aaa,bbb,ccc
+     */
+    @GetMapping("/diagnose/conversations")
+    public Map<String, Object> diagnoseConversations(
+            @RequestHeader(value = "X-Wix-Api-Key", required = false) String apiKey,
+            @RequestHeader(value = "X-Wix-Site-Id", required = false) String siteId,
+            @RequestParam String ids) {
+        WixClient wix = provider.get(apiKey, siteId);
+        String[] convIds = ids.split(",");
+        List<Map<String, Object>> results = new ArrayList<>();
+
+        for (String convId : convIds) {
+            convId = convId.trim();
+            Map<String, Object> diag = new LinkedHashMap<>();
+            diag.put("conversationId", convId);
+
+            // 1. Conversation 직접 조회
+            try {
+                Conversation conv = wix.inbox().getConversation(convId);
+                if (conv != null) {
+                    diag.put("conversationFound", true);
+                    diag.put("channels", conv.getChannels());
+                    diag.put("createdDate", conv.getCreatedDate());
+                    diag.put("participant", conv.getParticipant());
+                    diag.put("participantDisplayData", conv.getParticipantDisplayData());
+                    diag.put("businessDisplayData", conv.getBusinessDisplayData());
+
+                    // participant에서 contactId/visitorId 추출
+                    if (conv.getParticipant() != null) {
+                        diag.put("participantType",
+                                conv.getParticipant().containsKey("contactId") ? "CONTACT" :
+                                conv.getParticipant().containsKey("visitorId") ? "VISITOR" :
+                                conv.getParticipant().containsKey("memberId") ? "MEMBER" : "UNKNOWN");
+                    }
+                } else {
+                    diag.put("conversationFound", false);
+                    diag.put("conversationError", "getConversation returned null");
+                }
+            } catch (Exception e) {
+                diag.put("conversationFound", false);
+                diag.put("conversationError", e.getMessage());
+            }
+
+            // 2. 메시지 조회 (visibility별)
+            for (String vis : List.of("BUSINESS", "BUSINESS_AND_PARTICIPANT")) {
+                try {
+                    MessageList ml = wix.inbox().listMessages(convId, vis,
+                            CursorPagingRequest.builder().limit(5).build());
+                    int count = (ml != null && ml.getMessages() != null) ? ml.getMessages().size() : 0;
+                    boolean hasMore = ml != null && ml.getPagingMetadata() != null
+                            && ml.getPagingMetadata().getCursors() != null
+                            && ml.getPagingMetadata().getCursors().getNext() != null;
+
+                    Map<String, Object> visResult = new LinkedHashMap<>();
+                    visResult.put("count", hasMore ? count + "+" : String.valueOf(count));
+                    if (count > 0) {
+                        List<Map<String, Object>> msgList = new ArrayList<>();
+                        for (Message msg : ml.getMessages()) {
+                            Map<String, Object> ms = new LinkedHashMap<>();
+                            ms.put("id", msg.getId());
+                            ms.put("direction", msg.getDirection());
+                            ms.put("visibility", msg.getVisibility());
+                            ms.put("contentType", msg.getContent() != null
+                                    ? msg.getContent().getOrDefault("contentType", "UNKNOWN") : "UNKNOWN");
+                            ms.put("previewText", msg.getContent() != null
+                                    ? msg.getContent().getOrDefault("previewText", "") : "");
+                            ms.put("createdDate", msg.getCreatedDate());
+                            ms.put("sourceChannel", msg.getSourceChannel());
+                            ms.put("sender", msg.getSender());
+                            msgList.add(ms);
+                        }
+                        visResult.put("messages", msgList);
+                    }
+                    diag.put("messages_" + vis, visResult);
+                } catch (Exception e) {
+                    diag.put("messages_" + vis + "_error", e.getMessage());
+                }
+            }
+
+            results.add(diag);
+        }
+
+        return Map.of("diagnoses", results);
+    }
+
+    /**
+     * 대화 상세: conversation 메타 + contact 상세 + 전체 메시지 스레드 통합 조회.
+     * contactId가 없으면 conversation의 participant에서 자동 추출.
+     * 모든 메시지를 시간순(ASC)으로 반환하여 대화 흐름을 확인할 수 있음.
      */
     @GetMapping("/conversations/{conversationId}/detail")
     public Map<String, Object> conversationDetail(
             @RequestHeader(value = "X-Wix-Api-Key", required = false) String apiKey,
             @RequestHeader(value = "X-Wix-Site-Id", required = false) String siteId,
             @PathVariable String conversationId,
-            @RequestParam(required = false) String contactId) {
+            @RequestParam(required = false) String contactId,
+            @RequestParam(defaultValue = "50") int messageLimit) {
         WixClient wix = provider.get(apiKey, siteId);
 
         // 1. Conversation 정보
@@ -111,12 +295,21 @@ public class InboxController {
         if (conv != null) {
             convInfo.put("id", conv.getId());
             convInfo.put("channels", conv.getChannels());
+            convInfo.put("createdDate", conv.getCreatedDate());
             convInfo.put("participant", conv.getParticipant());
             convInfo.put("participantDisplayData", conv.getParticipantDisplayData());
             convInfo.put("businessDisplayData", conv.getBusinessDisplayData());
+
+            // contactId 자동 추출
+            if ((contactId == null || contactId.isBlank()) && conv.getParticipant() != null) {
+                Object cid = conv.getParticipant().get("contactId");
+                if (cid != null) {
+                    contactId = String.valueOf(cid);
+                }
+            }
         }
 
-        // 2. Contact 정보 (contactId가 전달된 경우)
+        // 2. Contact 정보
         Map<String, Object> contactInfo = new LinkedHashMap<>();
         if (contactId != null && !contactId.isBlank()) {
             try {
@@ -126,82 +319,110 @@ public class InboxController {
                     contactInfo.put("revision", contact.getRevision());
                     contactInfo.put("createdDate", contact.getCreatedDate());
                     contactInfo.put("updatedDate", contact.getUpdatedDate());
-                    contactInfo.put("info", contact.getInfo());
-                    contactInfo.put("primaryInfo", contact.getPrimaryInfo());
                     contactInfo.put("source", contact.getSource());
                     contactInfo.put("lastActivity", contact.getLastActivity());
                     contactInfo.put("picture", contact.getPicture());
+                    contactInfo.put("primaryInfo", contact.getPrimaryInfo());
+
+                    if (contact.getInfo() != null) {
+                        ContactInfo info = contact.getInfo();
+                        contactInfo.put("name", extractName(contact));
+                        if (info.getEmails() != null && info.getEmails().getItems() != null) {
+                            contactInfo.put("emails", info.getEmails().getItems().stream()
+                                    .map(e -> Map.of("email", e.getEmail(),
+                                            "tag", e.getTag() != null ? e.getTag() : "",
+                                            "primary", e.isPrimary()))
+                                    .toList());
+                        }
+                        if (info.getPhones() != null && info.getPhones().getItems() != null) {
+                            contactInfo.put("phones", info.getPhones().getItems().stream()
+                                    .map(p -> Map.of("phone", p.getPhone(),
+                                            "tag", p.getTag() != null ? p.getTag() : "",
+                                            "primary", p.isPrimary()))
+                                    .toList());
+                        }
+                        if (info.getAddresses() != null && info.getAddresses().getItems() != null) {
+                            contactInfo.put("addresses", info.getAddresses().getItems());
+                        }
+                        if (info.getCompany() != null) contactInfo.put("company", info.getCompany());
+                        if (info.getJobTitle() != null) contactInfo.put("jobTitle", info.getJobTitle());
+                        if (info.getLabelKeys() != null && info.getLabelKeys().getItems() != null) {
+                            contactInfo.put("labelKeys", info.getLabelKeys().getItems());
+                        }
+                        if (info.getExtendedFields() != null) {
+                            contactInfo.put("extendedFields", info.getExtendedFields());
+                        }
+                    }
                 }
             } catch (Exception e) {
                 contactInfo.put("error", e.getMessage());
             }
         }
 
-        // 3. 최근 메시지 5건 요약
-        MessageList msgs = wix.inbox().listMessages(conversationId, "BUSINESS",
-                CursorPagingRequest.builder().limit(5).build());
-        int messageCount = 0;
-        String lastDate = "";
-        if (msgs != null && msgs.getMessages() != null) {
-            messageCount = msgs.getMessages().size();
-            if (!msgs.getMessages().isEmpty()) {
-                lastDate = msgs.getMessages().get(0).getCreatedDate();
+        // 3. 전체 메시지 스레드 조회 (시간순 ASC)
+        // BUSINESS_AND_PARTICIPANT로 조회하여 모든 메시지 포함
+        List<Map<String, Object>> allMessages = new ArrayList<>();
+        String cursor = null;
+        int fetched = 0;
+        int maxPages = 10;
+        int page = 0;
+
+        while (fetched < messageLimit && page < maxPages) {
+            int batchSize = Math.min(50, messageLimit - fetched);
+            MessageList ml = wix.inbox().listMessages(conversationId,
+                    "BUSINESS_AND_PARTICIPANT", "ASC",
+                    CursorPagingRequest.builder().limit(batchSize).cursor(cursor).build());
+
+            if (ml == null || ml.getMessages() == null || ml.getMessages().isEmpty()) break;
+
+            for (Message msg : ml.getMessages()) {
+                allMessages.add(parseMessageFull(msg));
+                fetched++;
             }
-            if (msgs.getPagingMetadata() != null && msgs.getPagingMetadata().getCursors() != null
-                    && msgs.getPagingMetadata().getCursors().getNext() != null) {
-                messageCount = -1; // 5건 초과
+
+            if (ml.getPagingMetadata() != null && ml.getPagingMetadata().getCursors() != null
+                    && ml.getPagingMetadata().getCursors().getNext() != null) {
+                cursor = ml.getPagingMetadata().getCursors().getNext();
+            } else {
+                break;
             }
+            page++;
         }
 
-        return Map.of(
-                "conversation", convInfo,
-                "contact", contactInfo,
-                "messageCount", messageCount == -1 ? "5+" : String.valueOf(messageCount),
-                "lastMessageDate", lastDate
-        );
+        boolean hasMore = cursor != null && fetched >= messageLimit;
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("conversation", convInfo);
+        result.put("contact", contactInfo);
+        result.put("messages", allMessages);
+        result.put("messageCount", allMessages.size());
+        result.put("hasMoreMessages", hasMore);
+        if (hasMore) {
+            result.put("nextCursor", cursor);
+        }
+        return result;
     }
 
+    /**
+     * 대화의 메시지 목록.
+     */
     @GetMapping("/conversations/{conversationId}/messages")
     public Map<String, Object> listMessages(
             @RequestHeader(value = "X-Wix-Api-Key", required = false) String apiKey,
             @RequestHeader(value = "X-Wix-Site-Id", required = false) String siteId,
             @PathVariable String conversationId,
             @RequestParam(defaultValue = "30") int limit,
-            @RequestParam(defaultValue = "BUSINESS") String visibility,
+            @RequestParam(defaultValue = "BUSINESS_AND_PARTICIPANT") String visibility,
+            @RequestParam(defaultValue = "DESC") String sortOrder,
             @RequestParam(required = false) String cursor) {
         WixClient wix = provider.get(apiKey, siteId);
-        MessageList ml = wix.inbox().listMessages(conversationId, visibility,
+        MessageList ml = wix.inbox().listMessages(conversationId, visibility, sortOrder,
                 CursorPagingRequest.builder().limit(limit).cursor(cursor).build());
 
         List<Map<String, Object>> messages = new ArrayList<>();
         if (ml != null && ml.getMessages() != null) {
             for (Message msg : ml.getMessages()) {
-                Map<String, Object> row = new LinkedHashMap<>();
-                row.put("id", msg.getId());
-                row.put("createdDate", msg.getCreatedDate());
-                row.put("direction", msg.getDirection());
-                row.put("visibility", msg.getVisibility());
-                row.put("sourceChannel", msg.getSourceChannel());
-                row.put("sender", msg.getSender());
-
-                // content 파싱 — 유형별 분류
-                Map<String, Object> content = msg.getContent() != null ? msg.getContent() : Map.of();
-                String contentType = String.valueOf(content.getOrDefault("contentType", "UNKNOWN"));
-                row.put("contentType", contentType);
-                row.put("previewText", content.getOrDefault("previewText", ""));
-
-                switch (contentType) {
-                    case "BASIC" -> row.put("basicText", extractBasicText(content));
-                    case "MINIMAL" -> {
-                        row.put("minimalText", content.getOrDefault("minimal", Map.of()));
-                    }
-                    case "FORM" -> row.put("formData", content.getOrDefault("form", Map.of()));
-                    case "TEMPLATE" -> row.put("templateData", content.getOrDefault("template", Map.of()));
-                }
-
-                row.put("silent", false);
-                row.put("badges", msg.getBadges());
-                messages.add(row);
+                messages.add(parseMessageFull(msg));
             }
         }
 
@@ -218,16 +439,47 @@ public class InboxController {
         );
     }
 
-    private Map<String, Object> buildSummary(WixClient wix, Contact contact) {
+    /**
+     * 메시지 발송 (비즈니스 → 참여자)
+     */
+    @PostMapping("/conversations/{conversationId}/messages/send")
+    public Map<String, Object> sendMessage(
+            @RequestHeader(value = "X-Wix-Api-Key", required = false) String apiKey,
+            @RequestHeader(value = "X-Wix-Site-Id", required = false) String siteId,
+            @PathVariable String conversationId,
+            @RequestBody SendMessageRequest request) {
+        WixClient wix = provider.get(apiKey, siteId);
+        Message msg = wix.inbox().sendMessage(conversationId, request);
+        if (msg != null) {
+            return Map.of("success", true, "message", parseMessageFull(msg));
+        }
+        return Map.of("success", false);
+    }
+
+    // ── 내부 ──
+
+    private record BuildResult(Map<String, Object> summary, Map<String, Object> error) {
+        static BuildResult ok(Map<String, Object> summary) { return new BuildResult(summary, null); }
+        static BuildResult fail(String contactId, String contactName, String reason) {
+            return new BuildResult(null, Map.of(
+                    "contactId", contactId, "contactName", contactName, "reason", reason));
+        }
+    }
+
+    private BuildResult buildSummaryWithDiag(WixClient wix, Contact contact) {
+        String contactName = extractName(contact);
         try {
             Conversation conv = wix.inbox().getOrCreateConversation(contact.getId());
-            if (conv == null || conv.getId() == null) return null;
+            if (conv == null || conv.getId() == null) {
+                return BuildResult.fail(contact.getId(), contactName, "conversation is null");
+            }
 
+            // BUSINESS_AND_PARTICIPANT로 조회하여 모든 메시지 포함
             MessageList msgs = wix.inbox().listMessages(
-                    conv.getId(), "BUSINESS",
+                    conv.getId(), "BUSINESS_AND_PARTICIPANT",
                     CursorPagingRequest.builder().limit(1).build());
 
-            String lastPreview = "", lastDate = "", lastChannel = "", lastContentType = "";
+            String lastPreview = "", lastDate = "", lastChannel = "", lastContentType = "", lastDirection = "";
             boolean hasMessages = false;
 
             if (msgs != null && msgs.getMessages() != null && !msgs.getMessages().isEmpty()) {
@@ -238,26 +490,72 @@ public class InboxController {
                 lastPreview = String.valueOf(content.getOrDefault("previewText", ""));
                 lastDate = latest.getCreatedDate() != null ? latest.getCreatedDate() : "";
                 lastChannel = latest.getSourceChannel() != null ? latest.getSourceChannel() : "";
+                lastDirection = latest.getDirection() != null ? latest.getDirection() : "";
             }
 
-            String name = extractName(contact);
+            String email = extractPrimaryEmail(contact);
+            String phone = extractPrimaryPhone(contact);
+
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("conversationId", conv.getId());
             row.put("contactId", contact.getId());
-            row.put("contactName", name);
-            row.put("initials", makeInitials(name));
+            row.put("contactName", contactName);
+            row.put("initials", makeInitials(contactName));
+            row.put("email", email);
+            row.put("phone", phone);
             row.put("channels", conv.getChannels() != null ? conv.getChannels() : List.of());
             row.put("lastPreview", lastPreview);
             row.put("lastDate", lastDate);
             row.put("lastChannel", lastChannel);
             row.put("lastContentType", lastContentType);
+            row.put("lastDirection", lastDirection);
             row.put("hasMessages", hasMessages);
-            return row;
+            return BuildResult.ok(row);
         } catch (Exception e) {
-            return null;
+            log.warn("Failed to build summary for contact {} ({}): {}",
+                    contact.getId(), contactName, e.getMessage());
+            return BuildResult.fail(contact.getId(), contactName, e.getMessage());
         }
     }
 
+    private Map<String, Object> parseMessageFull(Message msg) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", msg.getId());
+        row.put("sequence", msg.getSequence());
+        row.put("createdDate", msg.getCreatedDate());
+        row.put("direction", msg.getDirection());
+        row.put("directionLabel", "PARTICIPANT_TO_BUSINESS".equals(msg.getDirection()) ? "수신" : "발신");
+        row.put("visibility", msg.getVisibility());
+        row.put("sourceChannel", msg.getSourceChannel());
+        row.put("sender", msg.getSender());
+        row.put("silent", msg.isSilent());
+        row.put("badges", msg.getBadges());
+
+        Map<String, Object> content = msg.getContent() != null ? msg.getContent() : Map.of();
+        String contentType = String.valueOf(content.getOrDefault("contentType", "UNKNOWN"));
+        row.put("contentType", contentType);
+        row.put("previewText", content.getOrDefault("previewText", ""));
+
+        switch (contentType) {
+            case "BASIC" -> {
+                row.put("basicText", extractBasicText(content));
+                row.put("basicItems", extractBasicItems(content));
+            }
+            case "MINIMAL" -> row.put("minimalData", content.getOrDefault("minimal", Map.of()));
+            case "FORM" -> {
+                Object form = content.getOrDefault("form", Map.of());
+                row.put("formData", form);
+                row.put("formFields", extractFormFields(form));
+            }
+            case "TEMPLATE" -> row.put("templateData", content.getOrDefault("template", Map.of()));
+            case "SYSTEM" -> row.put("systemData", content.getOrDefault("system", Map.of()));
+        }
+
+        row.put("rawContent", content);
+        return row;
+    }
+
+    @SuppressWarnings("unchecked")
     private String extractBasicText(Map<String, Object> content) {
         Object basic = content.get("basic");
         if (basic instanceof Map) {
@@ -269,10 +567,54 @@ public class InboxController {
                             Object txt = ((Map<?, ?>) i).get("text");
                             return txt != null ? String.valueOf(txt) : "";
                         })
+                        .filter(s -> !s.isEmpty())
                         .collect(Collectors.joining("\n"));
             }
         }
         return String.valueOf(content.getOrDefault("previewText", ""));
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> extractBasicItems(Map<String, Object> content) {
+        Object basic = content.get("basic");
+        if (basic instanceof Map) {
+            Object items = ((Map<?, ?>) basic).get("items");
+            if (items instanceof List) {
+                return ((List<?>) items).stream()
+                        .filter(i -> i instanceof Map)
+                        .map(i -> {
+                            Map<?, ?> item = (Map<?, ?>) i;
+                            Map<String, Object> parsed = new LinkedHashMap<>();
+                            if (item.containsKey("text")) parsed.put("type", "text");
+                            else if (item.containsKey("image")) parsed.put("type", "image");
+                            else if (item.containsKey("file")) parsed.put("type", "file");
+                            else parsed.put("type", "unknown");
+                            parsed.putAll((Map<String, Object>) item);
+                            return parsed;
+                        })
+                        .toList();
+            }
+        }
+        return List.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, String>> extractFormFields(Object form) {
+        if (!(form instanceof Map)) return List.of();
+        Object fields = ((Map<?, ?>) form).get("fields");
+        if (!(fields instanceof List)) return List.of();
+        return ((List<?>) fields).stream()
+                .filter(f -> f instanceof Map)
+                .map(f -> {
+                    Map<?, ?> field = (Map<?, ?>) f;
+                    Map<String, String> parsed = new LinkedHashMap<>();
+                    Object nameVal = field.containsKey("fieldName") ? field.get("fieldName") : field.get("name");
+                    Object valueVal = field.containsKey("fieldValue") ? field.get("fieldValue") : field.get("value");
+                    parsed.put("name", nameVal != null ? String.valueOf(nameVal) : "");
+                    parsed.put("value", valueVal != null ? String.valueOf(valueVal) : "");
+                    return parsed;
+                })
+                .toList();
     }
 
     private String extractName(Contact contact) {
@@ -282,6 +624,32 @@ public class InboxController {
             return ((first != null ? first : "") + " " + (last != null ? last : "")).trim();
         }
         return contact.getId();
+    }
+
+    private String extractPrimaryEmail(Contact contact) {
+        if (contact.getInfo() != null && contact.getInfo().getEmails() != null
+                && contact.getInfo().getEmails().getItems() != null) {
+            return contact.getInfo().getEmails().getItems().stream()
+                    .filter(ContactInfo.Email::isPrimary)
+                    .map(ContactInfo.Email::getEmail)
+                    .findFirst()
+                    .orElseGet(() -> contact.getInfo().getEmails().getItems().isEmpty()
+                            ? "" : contact.getInfo().getEmails().getItems().get(0).getEmail());
+        }
+        return "";
+    }
+
+    private String extractPrimaryPhone(Contact contact) {
+        if (contact.getInfo() != null && contact.getInfo().getPhones() != null
+                && contact.getInfo().getPhones().getItems() != null) {
+            return contact.getInfo().getPhones().getItems().stream()
+                    .filter(ContactInfo.Phone::isPrimary)
+                    .map(ContactInfo.Phone::getPhone)
+                    .findFirst()
+                    .orElseGet(() -> contact.getInfo().getPhones().getItems().isEmpty()
+                            ? "" : contact.getInfo().getPhones().getItems().get(0).getPhone());
+        }
+        return "";
     }
 
     private String makeInitials(String name) {

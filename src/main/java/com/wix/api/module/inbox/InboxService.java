@@ -73,4 +73,15 @@ public class InboxService extends AbstractWixService {
     public MessageList listMessages(String conversationId, CursorPagingRequest paging) {
         return listMessages(conversationId, "BUSINESS", null, paging);
     }
+
+    public Message sendMessage(String conversationId, SendMessageRequest request) {
+        return retryHandler.executeWithRetry(() -> {
+            Map<?, ?> response = restClient.post()
+                    .uri("/inbox/v2/conversations/{conversationId}/messages/send", conversationId)
+                    .body(request)
+                    .retrieve()
+                    .body(Map.class);
+            return extractFromMap(response, "message", Message.class);
+        });
+    }
 }

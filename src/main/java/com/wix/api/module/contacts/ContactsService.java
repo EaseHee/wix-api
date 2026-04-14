@@ -30,7 +30,7 @@ public class ContactsService extends AbstractWixService {
                 restClient.post()
                         .uri("/contacts/v4/contacts/query")
                         .body(Map.of(
-                                "paging", Map.of("limit", paging.getLimit(), "offset", paging.getOffset())
+                                "query", Map.of("paging", Map.of("limit", paging.getLimit(), "offset", paging.getOffset()))
                         ))
                         .retrieve()
                         .body(ContactList.class)
@@ -41,7 +41,7 @@ public class ContactsService extends AbstractWixService {
         return retryHandler.executeWithRetry(() ->
                 restClient.post()
                         .uri("/contacts/v4/contacts/query")
-                        .body(request)
+                        .body(Map.of("query", request))
                         .retrieve()
                         .body(ContactList.class)
         );
