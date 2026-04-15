@@ -12,7 +12,7 @@ Spring Boot 자동 설정 지원, 독립 실행 가능.
 |---|---|---|
 | Contacts | `ContactsService` | 연락처 CRUD, 라벨 관리, 쿼리/검색 |
 | CMS | `CmsService` | 데이터 컬렉션/아이템 CRUD, 쿼리, 벌크 작업 |
-| Inbox | `InboxService` | 대화 목록, 메시지 조회/발송 |
+| Inbox | `InboxService` | 대화 조회/생성, 메시지 조회/발송 |
 | Members | `MembersService` | 회원 CRUD, 승인/차단 |
 | Analytics | `AnalyticsService` | 사이트 통계 조회 (최근 62일) |
 | SEO | `SeoService` | SEO 태그, robots.txt 관리 |
@@ -199,16 +199,17 @@ wix.cms().bulkInsertDataItems("my-collection", List.of(
 ### Inbox — 대화/메시지
 
 ```java
-// 대화 목록 조회
-ConversationList conversations = wix.inbox().listConversations(
-        CursorPagingRequest.builder().limit(20).build());
-
-// 특정 대화의 메시지 조회
-MessageList messages = wix.inbox().listMessages("conversation-id",
-        CursorPagingRequest.builder().limit(50).build());
-
-// 대화 단건 조회
+// 대화 조회 (단건)
 Conversation conv = wix.inbox().getConversation("conversation-id");
+
+// 연락처 기반 대화 조회/생성
+Conversation conv = wix.inbox().getOrCreateConversation("contact-id");
+
+// 메시지 목록 조회 (커서 기반 페이징)
+MessageList messages = wix.inbox().listMessages("conversation-id",
+        "BUSINESS_AND_PARTICIPANT",  // visibility
+        "DESC",                       // sortOrder (최신순)
+        CursorPagingRequest.builder().limit(50).build());
 
 // 메시지 발송
 Message sent = wix.inbox().sendMessage("conversation-id",
@@ -217,6 +218,11 @@ Message sent = wix.inbox().sendMessage("conversation-id",
                 .content(Map.of("plainText", Map.of("text", "안녕하세요!")))
                 .build());
 ```
+
+> **참고**: Wix Inbox v2 API는 대화 목록 조회 엔드포인트를 제공하지 않습니다.
+> 대화 목록이 필요한 경우 Contacts API로 연락처를 조회한 뒤
+> `getOrCreateConversation()`으로 대화를 가져오는 방식을 사용합니다.
+> Demo 앱의 `InboxController`에 캐시가 적용된 구현 예시가 있습니다.
 
 ### Members — 회원
 
@@ -339,7 +345,7 @@ PagingRequest paging = PagingRequest.builder()
         .build();
 ```
 
-**Cursor 기반** (Inbox Messages, Conversations):
+**Cursor 기반** (Inbox Messages):
 ```java
 CursorPagingRequest paging = CursorPagingRequest.builder()
         .limit(50)

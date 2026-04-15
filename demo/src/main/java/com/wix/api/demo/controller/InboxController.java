@@ -8,10 +8,7 @@ import com.wix.api.WixClient;
 import com.wix.api.common.CursorPagingRequest;
 import com.wix.api.common.PagingRequest;
 import com.wix.api.demo.WixClientProvider;
-import com.wix.api.module.contacts.dto.Contact;
-import com.wix.api.module.contacts.dto.ContactInfo;
-import com.wix.api.module.contacts.dto.ContactList;
-import com.wix.api.module.contacts.dto.QueryContactsRequest;
+import com.wix.api.module.contacts.dto.*;
 import com.wix.api.module.inbox.dto.*;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -25,12 +22,13 @@ public class InboxController {
 
     private static final Logger log = LoggerFactory.getLogger(InboxController.class);
     private final WixClientProvider provider;
-    // 병렬 스레드를 줄여 rate limit 회피 (10 → 5)
     private final ExecutorService executor = Executors.newFixedThreadPool(5);
+    private final InboxCache cache = new InboxCache();
 
     /**
-     * 대화 목록: 연락처를 lastActivity 내림차순으로 조회하여 최근 활동 순으로 반환.
-     * 에러 발생 시 errors 필드에 실패 사유를 보고하여 누락 원인 추적 가능.
+     * 대화 목록: 연락처 기반 조회 + 캐시 적용.
+     * conversation/메시지 프리뷰를 캐시하여 반복 호출 시 API 호출을 대폭 절감.
+     * 첫 호출: contact당 2회(conversation+message) → 재호출: 캐시 히트로 0회.
      */
     @GetMapping("/conversations")
     public Map<String, Object> listConversations(
@@ -59,7 +57,7 @@ public class InboxController {
 
             List<CompletableFuture<BuildResult>> futures = contactList.getContacts().stream()
                     .map(contact -> CompletableFuture.supplyAsync(
-                            () -> buildSummaryWithDiag(wix, contact), executor))
+                            () -> enrichFromContact(wix, contact), executor))
                     .toList();
 
             Set<String> seenIds = allConversations.stream()
@@ -278,7 +276,7 @@ public class InboxController {
     /**
      * 대화 상세: conversation 메타 + contact 상세 + 전체 메시지 스레드 통합 조회.
      * contactId가 없으면 conversation의 participant에서 자동 추출.
-     * 모든 메시지를 시간순(ASC)으로 반환하여 대화 흐름을 확인할 수 있음.
+     * contact 조회와 메시지 조회를 병렬 실행하여 지연 시간 최소화.
      */
     @GetMapping("/conversations/{conversationId}/detail")
     public Map<String, Object> conversationDetail(
@@ -289,7 +287,7 @@ public class InboxController {
             @RequestParam(defaultValue = "50") int messageLimit) {
         WixClient wix = provider.get(apiKey, siteId);
 
-        // 1. Conversation 정보
+        // 1. Conversation 정보 (contactId 추출을 위해 선행)
         Conversation conv = wix.inbox().getConversation(conversationId);
         Map<String, Object> convInfo = new LinkedHashMap<>();
         if (conv != null) {
@@ -300,106 +298,104 @@ public class InboxController {
             convInfo.put("participantDisplayData", conv.getParticipantDisplayData());
             convInfo.put("businessDisplayData", conv.getBusinessDisplayData());
 
-            // contactId 자동 추출
-            if ((contactId == null || contactId.isBlank()) && conv.getParticipant() != null) {
-                Object cid = conv.getParticipant().get("contactId");
-                if (cid != null) {
-                    contactId = String.valueOf(cid);
-                }
+            if ((contactId == null || contactId.isBlank())) {
+                contactId = extractContactId(conv);
             }
         }
 
-        // 2. Contact 정보
-        Map<String, Object> contactInfo = new LinkedHashMap<>();
-        if (contactId != null && !contactId.isBlank()) {
-            try {
-                Contact contact = wix.contacts().getContact(contactId);
-                if (contact != null) {
-                    contactInfo.put("id", contact.getId());
-                    contactInfo.put("revision", contact.getRevision());
-                    contactInfo.put("createdDate", contact.getCreatedDate());
-                    contactInfo.put("updatedDate", contact.getUpdatedDate());
-                    contactInfo.put("source", contact.getSource());
-                    contactInfo.put("lastActivity", contact.getLastActivity());
-                    contactInfo.put("picture", contact.getPicture());
-                    contactInfo.put("primaryInfo", contact.getPrimaryInfo());
+        // 2. Contact 조회 + 메시지 조회를 병렬 실행
+        final String finalContactId = contactId;
 
+        CompletableFuture<Map<String, Object>> contactFuture = CompletableFuture.supplyAsync(() -> {
+            Map<String, Object> info = new LinkedHashMap<>();
+            if (finalContactId == null || finalContactId.isBlank()) return info;
+            try {
+                Contact contact = cache.getContact(finalContactId);
+                if (contact == null) {
+                    contact = wix.contacts().getContact(finalContactId);
+                    if (contact != null) cache.putContact(finalContactId, contact);
+                }
+                if (contact != null) {
+                    info.put("id", contact.getId());
+                    info.put("revision", contact.getRevision());
+                    info.put("createdDate", contact.getCreatedDate());
+                    info.put("updatedDate", contact.getUpdatedDate());
+                    info.put("source", contact.getSource());
+                    info.put("lastActivity", contact.getLastActivity());
+                    info.put("picture", contact.getPicture());
+                    info.put("primaryInfo", contact.getPrimaryInfo());
                     if (contact.getInfo() != null) {
-                        ContactInfo info = contact.getInfo();
-                        contactInfo.put("name", extractName(contact));
-                        if (info.getEmails() != null && info.getEmails().getItems() != null) {
-                            contactInfo.put("emails", info.getEmails().getItems().stream()
+                        ContactInfo ci = contact.getInfo();
+                        info.put("name", extractName(contact));
+                        if (ci.getEmails() != null && ci.getEmails().getItems() != null) {
+                            info.put("emails", ci.getEmails().getItems().stream()
                                     .map(e -> Map.of("email", e.getEmail(),
                                             "tag", e.getTag() != null ? e.getTag() : "",
                                             "primary", e.isPrimary()))
                                     .toList());
                         }
-                        if (info.getPhones() != null && info.getPhones().getItems() != null) {
-                            contactInfo.put("phones", info.getPhones().getItems().stream()
+                        if (ci.getPhones() != null && ci.getPhones().getItems() != null) {
+                            info.put("phones", ci.getPhones().getItems().stream()
                                     .map(p -> Map.of("phone", p.getPhone(),
                                             "tag", p.getTag() != null ? p.getTag() : "",
                                             "primary", p.isPrimary()))
                                     .toList());
                         }
-                        if (info.getAddresses() != null && info.getAddresses().getItems() != null) {
-                            contactInfo.put("addresses", info.getAddresses().getItems());
+                        if (ci.getAddresses() != null && ci.getAddresses().getItems() != null) {
+                            info.put("addresses", ci.getAddresses().getItems());
                         }
-                        if (info.getCompany() != null) contactInfo.put("company", info.getCompany());
-                        if (info.getJobTitle() != null) contactInfo.put("jobTitle", info.getJobTitle());
-                        if (info.getLabelKeys() != null && info.getLabelKeys().getItems() != null) {
-                            contactInfo.put("labelKeys", info.getLabelKeys().getItems());
+                        if (ci.getCompany() != null) info.put("company", ci.getCompany());
+                        if (ci.getJobTitle() != null) info.put("jobTitle", ci.getJobTitle());
+                        if (ci.getLabelKeys() != null && ci.getLabelKeys().getItems() != null) {
+                            info.put("labelKeys", ci.getLabelKeys().getItems());
                         }
-                        if (info.getExtendedFields() != null) {
-                            contactInfo.put("extendedFields", info.getExtendedFields());
+                        if (ci.getExtendedFields() != null) {
+                            info.put("extendedFields", ci.getExtendedFields());
                         }
                     }
                 }
             } catch (Exception e) {
-                contactInfo.put("error", e.getMessage());
+                info.put("error", e.getMessage());
             }
-        }
+            return info;
+        }, executor);
 
-        // 3. 전체 메시지 스레드 조회 (시간순 ASC)
-        // BUSINESS_AND_PARTICIPANT로 조회하여 모든 메시지 포함
-        List<Map<String, Object>> allMessages = new ArrayList<>();
-        String cursor = null;
-        int fetched = 0;
-        int maxPages = 10;
-        int page = 0;
-
-        while (fetched < messageLimit && page < maxPages) {
-            int batchSize = Math.min(50, messageLimit - fetched);
-            MessageList ml = wix.inbox().listMessages(conversationId,
-                    "BUSINESS_AND_PARTICIPANT", "ASC",
-                    CursorPagingRequest.builder().limit(batchSize).cursor(cursor).build());
-
-            if (ml == null || ml.getMessages() == null || ml.getMessages().isEmpty()) break;
-
-            for (Message msg : ml.getMessages()) {
-                allMessages.add(parseMessageFull(msg));
-                fetched++;
+        CompletableFuture<List<Map<String, Object>>> messagesFuture = CompletableFuture.supplyAsync(() -> {
+            List<Map<String, Object>> allMessages = new ArrayList<>();
+            String msgCursor = null;
+            int fetched = 0;
+            int maxPages = 10;
+            int page = 0;
+            while (fetched < messageLimit && page < maxPages) {
+                int batchSize = Math.min(50, messageLimit - fetched);
+                MessageList ml = wix.inbox().listMessages(conversationId,
+                        "BUSINESS_AND_PARTICIPANT", "ASC",
+                        CursorPagingRequest.builder().limit(batchSize).cursor(msgCursor).build());
+                if (ml == null || ml.getMessages() == null || ml.getMessages().isEmpty()) break;
+                for (Message msg : ml.getMessages()) {
+                    allMessages.add(parseMessageFull(msg));
+                    fetched++;
+                }
+                if (ml.getPagingMetadata() != null && ml.getPagingMetadata().getCursors() != null
+                        && ml.getPagingMetadata().getCursors().getNext() != null) {
+                    msgCursor = ml.getPagingMetadata().getCursors().getNext();
+                } else {
+                    break;
+                }
+                page++;
             }
+            return allMessages;
+        }, executor);
 
-            if (ml.getPagingMetadata() != null && ml.getPagingMetadata().getCursors() != null
-                    && ml.getPagingMetadata().getCursors().getNext() != null) {
-                cursor = ml.getPagingMetadata().getCursors().getNext();
-            } else {
-                break;
-            }
-            page++;
-        }
-
-        boolean hasMore = cursor != null && fetched >= messageLimit;
+        Map<String, Object> contactInfo = contactFuture.join();
+        List<Map<String, Object>> allMessages = messagesFuture.join();
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("conversation", convInfo);
         result.put("contact", contactInfo);
         result.put("messages", allMessages);
         result.put("messageCount", allMessages.size());
-        result.put("hasMoreMessages", hasMore);
-        if (hasMore) {
-            result.put("nextCursor", cursor);
-        }
+        result.put("hasMoreMessages", allMessages.size() >= messageLimit);
         return result;
     }
 
@@ -451,6 +447,7 @@ public class InboxController {
         WixClient wix = provider.get(apiKey, siteId);
         Message msg = wix.inbox().sendMessage(conversationId, request);
         if (msg != null) {
+            cache.invalidateConversation(conversationId);
             return Map.of("success", true, "message", parseMessageFull(msg));
         }
         return Map.of("success", false);
@@ -466,31 +463,55 @@ public class InboxController {
         }
     }
 
-    private BuildResult buildSummaryWithDiag(WixClient wix, Contact contact) {
+    private BuildResult enrichFromContact(WixClient wix, Contact contact) {
         String contactName = extractName(contact);
         try {
-            Conversation conv = wix.inbox().getOrCreateConversation(contact.getId());
+            // 1. Conversation (캐시 우선)
+            Conversation conv = cache.getConversation(contact.getId());
+            if (conv == null) {
+                conv = wix.inbox().getOrCreateConversation(contact.getId());
+                if (conv != null) cache.putConversation(contact.getId(), conv);
+            }
             if (conv == null || conv.getId() == null) {
                 return BuildResult.fail(contact.getId(), contactName, "conversation is null");
             }
 
-            // BUSINESS_AND_PARTICIPANT로 조회하여 모든 메시지 포함
-            MessageList msgs = wix.inbox().listMessages(
-                    conv.getId(), "BUSINESS_AND_PARTICIPANT",
-                    CursorPagingRequest.builder().limit(1).build());
-
+            // 2. 메시지 프리뷰 (캐시 우선)
             String lastPreview = "", lastDate = "", lastChannel = "", lastContentType = "", lastDirection = "";
             boolean hasMessages = false;
 
-            if (msgs != null && msgs.getMessages() != null && !msgs.getMessages().isEmpty()) {
-                hasMessages = true;
-                Message latest = msgs.getMessages().get(0);
-                Map<String, Object> content = latest.getContent() != null ? latest.getContent() : Map.of();
-                lastContentType = String.valueOf(content.getOrDefault("contentType", ""));
-                lastPreview = String.valueOf(content.getOrDefault("previewText", ""));
-                lastDate = latest.getCreatedDate() != null ? latest.getCreatedDate() : "";
-                lastChannel = latest.getSourceChannel() != null ? latest.getSourceChannel() : "";
-                lastDirection = latest.getDirection() != null ? latest.getDirection() : "";
+            Map<String, Object> cachedPreview = cache.getMessagePreview(conv.getId());
+            if (cachedPreview != null) {
+                hasMessages = (boolean) cachedPreview.getOrDefault("hasMessages", false);
+                lastPreview = (String) cachedPreview.getOrDefault("lastPreview", "");
+                lastDate = (String) cachedPreview.getOrDefault("lastDate", "");
+                lastChannel = (String) cachedPreview.getOrDefault("lastChannel", "");
+                lastContentType = (String) cachedPreview.getOrDefault("lastContentType", "");
+                lastDirection = (String) cachedPreview.getOrDefault("lastDirection", "");
+            } else {
+                MessageList msgs = wix.inbox().listMessages(
+                        conv.getId(), "BUSINESS_AND_PARTICIPANT",
+                        CursorPagingRequest.builder().limit(1).build());
+
+                if (msgs != null && msgs.getMessages() != null && !msgs.getMessages().isEmpty()) {
+                    hasMessages = true;
+                    Message latest = msgs.getMessages().get(0);
+                    Map<String, Object> content = latest.getContent() != null ? latest.getContent() : Map.of();
+                    lastContentType = String.valueOf(content.getOrDefault("contentType", ""));
+                    lastPreview = String.valueOf(content.getOrDefault("previewText", ""));
+                    lastDate = latest.getCreatedDate() != null ? latest.getCreatedDate() : "";
+                    lastChannel = latest.getSourceChannel() != null ? latest.getSourceChannel() : "";
+                    lastDirection = latest.getDirection() != null ? latest.getDirection() : "";
+                }
+
+                Map<String, Object> preview = new LinkedHashMap<>();
+                preview.put("hasMessages", hasMessages);
+                preview.put("lastPreview", lastPreview);
+                preview.put("lastDate", lastDate);
+                preview.put("lastChannel", lastChannel);
+                preview.put("lastContentType", lastContentType);
+                preview.put("lastDirection", lastDirection);
+                cache.putMessagePreview(conv.getId(), preview);
             }
 
             String email = extractPrimaryEmail(contact);
@@ -516,6 +537,14 @@ public class InboxController {
                     contact.getId(), contactName, e.getMessage());
             return BuildResult.fail(contact.getId(), contactName, e.getMessage());
         }
+    }
+
+    private String extractContactId(Conversation conv) {
+        if (conv.getParticipant() != null) {
+            Object cid = conv.getParticipant().get("contactId");
+            return cid != null ? String.valueOf(cid) : null;
+        }
+        return null;
     }
 
     private Map<String, Object> parseMessageFull(Message msg) {
