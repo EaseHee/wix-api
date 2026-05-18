@@ -28,3 +28,10 @@ lombok.config
 
 # Logs
 *.log
+
+# Build output (Eclipse/IntelliJ)
+bin/
+
+# Tooling
+.bkit/
+.claude/

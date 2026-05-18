@@ -69,17 +69,39 @@
   .dr-b pre{font-family:var(--m);font-size:12px;line-height:1.7;white-space:pre-wrap;word-break:break-all}
   .dr-b .key{color:var(--jk);font-weight:600}.dr-b .str{color:var(--js)}.dr-b .num{color:var(--jn)}.dr-b .bool{color:var(--jb)}.dr-b .null{color:var(--jnl)}
   /* Inbox Card List */
+  .inbox-tools{display:flex;align-items:center;gap:8px;padding:8px 24px;border-bottom:1px solid var(--bd);background:var(--sf);flex-shrink:0}
+  .inbox-tools input{flex:1;max-width:320px;font-family:inherit;font-size:12px;padding:5px 10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);outline:none}
+  .inbox-tools input:focus{border-color:var(--bds)}
+  .inbox-tools .seg{display:flex;border:1px solid var(--bd);background:var(--bg)}
+  .inbox-tools .seg button{font-family:inherit;font-size:11px;font-weight:600;padding:4px 10px;background:transparent;border:none;color:var(--tx2);cursor:pointer;border-right:1px solid var(--bd)}
+  .inbox-tools .seg button:last-child{border-right:none}
+  .inbox-tools .seg button.on{background:var(--acc);color:var(--inv)}
+  .inbox-tools .seg button:hover:not(.on){color:var(--tx);background:var(--hov)}
+  .inbox-tools .ct{font-size:11px;color:var(--txm);margin-left:auto;font-family:var(--m)}
   .inbox-list{flex:1;overflow:auto}
-  .inbox-card{display:flex;align-items:center;gap:14px;padding:14px 24px;border-bottom:1px solid var(--bd);cursor:pointer;transition:background .08s}
+  .inbox-card{display:flex;align-items:flex-start;gap:14px;padding:14px 24px;border-bottom:1px solid var(--bd);cursor:pointer;transition:background .08s;position:relative}
   .inbox-card:hover{background:var(--hov)}
-  .inbox-avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--inv);flex-shrink:0}
+  .inbox-card.unread{background:#fafbff}
+  .inbox-card.unread:hover{background:#f0f2ff}
+  .inbox-card.unread::before{content:'';position:absolute;left:8px;top:50%;width:6px;height:6px;border-radius:50%;background:var(--acc);transform:translateY(-50%)}
+  .inbox-avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--inv);flex-shrink:0;margin-top:2px}
   .inbox-body{flex:1;min-width:0}
-  .inbox-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .inbox-preview{font-size:12px;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
-  .inbox-meta{flex-shrink:0;text-align:right}
+  .inbox-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}
+  .inbox-card.unread .inbox-name{font-weight:800}
+  .inbox-name .bdg{display:inline-flex;align-items:center;font-size:9px;font-weight:700;padding:1px 5px;border:1px solid var(--bd);background:var(--bg);color:var(--tx2);text-transform:uppercase;letter-spacing:.3px}
+  .inbox-name .bdg.warn{border-color:#d97706;color:#d97706;background:#fff7ed}
+  .inbox-preview{font-size:12px;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;display:flex;align-items:center;gap:5px}
+  .inbox-preview .ico{flex-shrink:0;color:var(--txm);font-size:11px}
+  .inbox-preview .sender{color:var(--txm);font-weight:600;flex-shrink:0}
+  .inbox-form-sum{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px}
+  .inbox-form-sum .fs{display:inline-flex;align-items:center;gap:4px;color:var(--tx2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .inbox-form-sum .fs-k{font-weight:600;color:var(--txm);font-size:10px;text-transform:lowercase}
+  .inbox-meta{flex-shrink:0;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:3px;margin-top:2px}
   .inbox-date{font-size:11px;color:var(--txm)}
-  .inbox-ch{font-size:10px;color:var(--txm);margin-top:2px}
-  .inbox-nomsg{opacity:.4}
+  .inbox-card.unread .inbox-date{color:var(--acc);font-weight:700}
+  .inbox-ch{font-size:10px;color:var(--txm);display:flex;align-items:center;gap:4px}
+  .inbox-ch .att{color:var(--tx2)}
+  .inbox-nomsg{opacity:.45}
 
   /* Message Thread */
   .msg-list{flex:1;overflow:auto;padding:16px 24px}
@@ -97,6 +119,15 @@
   .msg-form-fields .ff-n{font-weight:600;color:var(--tx2);min-width:100px}
   .msg-form-fields .ff-v{color:var(--tx)}
   .msg-minimal{font-style:italic;color:var(--txm)}
+  .msg-att{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px}
+  .msg-att .a-img{display:block;max-width:200px;max-height:160px;border:1px solid var(--bd);background:var(--sf);object-fit:cover}
+  .msg-att .a-file{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);font-size:11px;text-decoration:none;font-family:var(--m)}
+  .msg-att .a-file:hover{border-color:var(--bds);background:var(--hov)}
+  .msg-item.out .msg-att .a-file{background:var(--bg);color:var(--tx)}
+  .msg-sender{font-size:10px;font-weight:700;color:var(--tx2);margin-bottom:3px}
+  .msg-item.out .msg-sender{text-align:right}
+  .msg-bdg{display:inline-flex;font-size:9px;font-weight:700;padding:1px 5px;border:1px solid var(--bd);background:var(--bg);color:var(--tx2);text-transform:uppercase;letter-spacing:.3px;margin-left:6px}
+  .msg-bdg.warn{border-color:#d97706;color:#d97706;background:#fff7ed}
 
   .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--txm);font-size:13px;gap:8px}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -160,6 +191,14 @@ const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 const hl = o => JSON.stringify(o,null,2).replace(/("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
   m=>{let c='num';if(/^"/.test(m))c=/:$/.test(m)?'key':'str';else if(/true|false/.test(m))c='bool';else if(/null/.test(m))c='null';return`<span class="${c}">${esc(m)}</span>`});
 const fmtDate = s => s ? s.replace('T',' ').slice(0,19) : '-';
+const fmtSize = n => {
+  const x = typeof n==='string' ? parseInt(n,10) : n;
+  if (!x || isNaN(x)) return '';
+  if (x < 1024) return x+'B';
+  if (x < 1024*1024) return (x/1024).toFixed(1)+'KB';
+  if (x < 1024*1024*1024) return (x/1024/1024).toFixed(1)+'MB';
+  return (x/1024/1024/1024).toFixed(2)+'GB';
+};
 const isUUID = s => /^[a-f0-9-]{20,}$/i.test(s);
 
 /* ═══ Data Extractors — typed column rendering ═══ */
@@ -263,9 +302,18 @@ const load = async () => {
       case 'labels': ld=await api(`/api/contacts/labels?limit=${lim}&offset=${off}`); renderLabels(); break;
       case 'cms': ld=await api(`/api/cms/collections?limit=${lim}&offset=${off}`); renderCms(); break;
       case 'cms-items': ld=await api(`/api/cms/items?collectionId=${encodeURIComponent(cmsC)}&limit=${lim}&offset=${off}`); renderCmsItems(); break;
-      case 'inbox': showLoading('Scanning contacts for conversations...'); ld=await api('/api/inbox/conversations?scanPages=10'); renderInbox(); break;
-      case 'inbox-detail': showLoading('Loading conversation...'); ld=await api(`/api/inbox/conversations/${encodeURIComponent(convId)}/detail?contactId=${encodeURIComponent(_inboxContactId)}`); renderInboxDetail(); break;
-      case 'inbox-msgs': showLoading('Loading messages...'); ld=await api(`/api/inbox/conversations/${encodeURIComponent(convId)}/messages?limit=30&visibility=BUSINESS`); renderInboxMsgs(); break;
+      case 'inbox': {
+        showLoading('Loading conversations...');
+        const r = await api(`/api/inbox/conversations?page=0&pageSize=${_inboxPageSize}`);
+        ld = r;
+        ld.conversations = r.conversations || [];
+        ld._page = r.page || 0;
+        ld._hasMore = !!r.hasMore;
+        renderInbox();
+        break;
+      }
+      case 'inbox-detail': showLoading('Loading conversation...'); ld=await api(`/api/inbox/conversations/${encodeURIComponent(convId)}/detail?contactId=${encodeURIComponent(_inboxContactId)}&includeRaw=false`); renderInboxDetail(); break;
+      case 'inbox-msgs': showLoading('Loading messages...'); ld=await api(`/api/inbox/conversations/${encodeURIComponent(convId)}/messages?limit=50&visibility=ALL&sortOrder=DESC`); renderInboxMsgs(); break;
       case 'seo': dd=await api('/api/seo/robots'); pg='detail'; renderDetail(); break;
       case 'detail': renderDetail(); break;
     }
@@ -404,40 +452,131 @@ const fmtCmsVal = v => {
 const AVATAR_COLORS = ['#7B68EE','#20B2AA','#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FFEAA7','#DDA0DD','#98D8C8','#F7DC6F','#BB8FCE','#85C1E9'];
 const avatarColor = name => AVATAR_COLORS[Math.abs([...name].reduce((h,c)=>((h<<5)-h)+c.charCodeAt(0),0)) % AVATAR_COLORS.length];
 
+let _inboxQuery = '';
+let _inboxFilter = 'all'; // all | unread | form | attach
+let _inboxPageSize = 30;  // 1회 조회 contact/conversation 수 (10/30/50/100)
+let _inboxLoadingMore = false;
+
 const renderInbox = () => {
-  const convs = (ld.conversations || []).slice().sort((a, b) => {
+  const all = (ld.conversations || []).slice().sort((a, b) => {
     if (a.hasMessages !== b.hasMessages) return a.hasMessages ? -1 : 1;
+    if ((a.unreadHint?1:0) !== (b.unreadHint?1:0)) return a.unreadHint ? -1 : 1;
     return (b.lastDate || '').localeCompare(a.lastDate || '');
   });
-  ld.conversations = convs;
+  ld.conversations = all;
+
+  const q = _inboxQuery.trim().toLowerCase();
+  const filtered = all.filter(c => {
+    if (_inboxFilter === 'unread' && !c.unreadHint) return false;
+    if (_inboxFilter === 'form' && c.lastContentType !== 'FORM') return false;
+    if (_inboxFilter === 'attach' && !c.hasAttachment) return false;
+    if (!q) return true;
+    const hay = [c.contactName, c.email, c.phone, c.lastPreview,
+                 c.lastSenderName, c.lastChannelLabel,
+                 ...(c.formSummary||[]).map(f => `${f.label} ${f.value}`)]
+                .filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+
   const m = $('M');
-  const active = ld.activeCount || convs.filter(c=>c.hasMessages).length;
-  const scanned = ld.totalScanned || convs.length;
+  const active = ld.activeCount || all.filter(c=>c.hasMessages).length;
+  const unread = all.filter(c=>c.unreadHint).length;
+  const scanned = all.length;
   const total = ld.totalContacts || scanned;
-  m.innerHTML = `<div class="tb"><span class="tb-t">Inbox</span><span class="tb-c">${active} active / ${scanned} scanned (${total} contacts)</span><div class="tb-r" style="font-size:10px;color:var(--txm)">Contacts 기반 조회 — 익명 Visitor 대화는 REST API 미지원</div></div>`;
+  const pg = (ld._page||0) + 1;
+  const hasMore = !!ld._hasMore;
+
+  m.innerHTML = `<div class="tb"><span class="tb-t">Inbox</span><span class="tb-c">${active} active · ${unread} unread / loaded ${scanned} of ${total} contacts · page ${pg}</span><div class="tb-r" style="font-size:10px;color:var(--txm)">Contacts 기반 조회 — 익명 Visitor 대화는 REST API 미지원</div></div>`;
+
+  // 검색 + 필터 + 페이지 크기 도구바
+  let tools = '<div class="inbox-tools">';
+  tools += `<input id="inboxQ" type="text" placeholder="Search name, email, preview, form fields..." value="${esc(_inboxQuery)}" oninput="onInboxSearch(this.value)">`;
+  tools += '<div class="seg">';
+  const segs = [['all','All'],['unread','Unread'],['form','Form'],['attach','📎']];
+  segs.forEach(([k,l]) => {
+    tools += `<button class="${_inboxFilter===k?'on':''}" onclick="setInboxFilter('${k}')">${esc(l)}</button>`;
+  });
+  tools += '</div>';
+  tools += `<label style="font-size:11px;color:var(--txm);display:flex;align-items:center;gap:4px">Page size: <select onchange="setInboxPageSize(this.value)" style="padding:2px 6px">
+    ${[10,30,50,100].map(n=>`<option value="${n}" ${_inboxPageSize==n?'selected':''}>${n}</option>`).join('')}
+  </select></label>`;
+  tools += `<span class="ct">${filtered.length} / ${all.length}</span>`;
+  tools += '</div>';
+  m.innerHTML += tools;
 
   let h = '<div class="inbox-list">';
-  convs.forEach((c, i) => {
+  if (!filtered.length) {
+    h += '<div class="empty" style="padding:60px 24px">No conversations match.</div>';
+  }
+  filtered.forEach((c, i) => {
+    const origIdx = all.indexOf(c);
     const noMsg = !c.hasMessages;
     const color = avatarColor(c.contactName || '?');
     const dateLabel = c.lastDate ? fmtRelativeDate(c.lastDate) : '';
-    const preview = c.lastPreview || (noMsg ? 'No messages' : '');
-    const chLabel = c.channels?.length ? c.channels.join(', ') : '';
+    const preview = c.lastPreview || (noMsg ? 'No messages' : (c.lastContentType ? `[${c.lastContentType}]` : '(no text)'));
+    const chLabel = c.lastChannelLabel || (c.channels?.length ? c.channels.join(', ') : '');
     const typeIcon = {BASIC:'💬',MINIMAL:'📩',FORM:'📋',TEMPLATE:'📄',SYSTEM:'⚙️'}[c.lastContentType] || '';
+    const isOut = c.lastSenderType === 'BUSINESS' || c.lastSenderType === 'APP';
+    const senderTag = isOut ? '<span class="sender">You:</span>' : '';
+    const cls = `inbox-card${noMsg?' inbox-nomsg':''}${c.unreadHint?' unread':''}`;
 
-    h += `<div class="inbox-card${noMsg?' inbox-nomsg':''}" onclick="openConvMsgs(${i})">`;
+    h += `<div class="${cls}" onclick="openConvMsgs(${origIdx})">`;
     h += `<div class="inbox-avatar" style="background:${color}">${esc(c.initials||'?')}</div>`;
     h += `<div class="inbox-body">`;
-    h += `<div class="inbox-name">${esc(c.contactName||'Unknown')}</div>`;
-    h += `<div class="inbox-preview">${typeIcon} ${esc(preview)}</div>`;
+    h += `<div class="inbox-name"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.contactName||'Unknown')}</span>`;
+    (c.badges||[]).forEach(b => {
+      const warn = /UNANSWER|PENDING/i.test(b);
+      h += `<span class="bdg${warn?' warn':''}">${esc(b)}</span>`;
+    });
+    h += `</div>`;
+    h += `<div class="inbox-preview"><span class="ico">${typeIcon}</span>${senderTag}<span style="overflow:hidden;text-overflow:ellipsis">${esc(preview)}</span></div>`;
+    if (c.formSummary && c.formSummary.length) {
+      h += '<div class="inbox-form-sum">';
+      c.formSummary.forEach(f => {
+        h += `<span class="fs"><span class="fs-k">${esc(f.label)}:</span>${esc(f.value)}</span>`;
+      });
+      h += '</div>';
+    }
     h += `</div>`;
     h += `<div class="inbox-meta">`;
     h += `<div class="inbox-date">${esc(dateLabel)}</div>`;
-    h += `<div class="inbox-ch">${esc(chLabel)}</div>`;
+    h += `<div class="inbox-ch">${c.hasAttachment?`<span class="att">📎${c.attachmentCount>1?c.attachmentCount:''}</span>`:''} ${esc(chLabel)}</div>`;
     h += `</div></div>`;
   });
   h += '</div>';
+
+  // Load more / 페이지네이션 컨트롤
+  if (hasMore) {
+    h += `<div style="text-align:center;padding:14px"><button id="inboxLoadMore" onclick="loadMoreInbox()" style="padding:8px 16px;cursor:pointer">${_inboxLoadingMore?'Loading...':'↓ Load next '+_inboxPageSize+' contacts'}</button></div>`;
+  } else if (all.length > 0) {
+    h += `<div style="text-align:center;padding:14px;color:var(--txm);font-size:11px">— end of contacts —</div>`;
+  }
   m.innerHTML += h;
+};
+
+const onInboxSearch = v => { _inboxQuery = v; renderInbox(); setTimeout(()=>{ const el=document.getElementById('inboxQ'); if(el){el.focus(); el.setSelectionRange(v.length,v.length);} },0); };
+const setInboxFilter = f => { _inboxFilter = f; renderInbox(); };
+const setInboxPageSize = n => {
+  const v = parseInt(n,10); if (!v) return;
+  _inboxPageSize = v;
+  // pageSize 변경 시 첫 페이지부터 다시 로드
+  push({pg:'inbox', off:0});
+};
+const loadMoreInbox = async () => {
+  if (_inboxLoadingMore || !ld._hasMore) return;
+  _inboxLoadingMore = true; renderInbox();
+  try {
+    const nextPage = (ld._page||0) + 1;
+    const r = await api(`/api/inbox/conversations?page=${nextPage}&pageSize=${_inboxPageSize}`);
+    const seen = new Set((ld.conversations||[]).map(c=>c.conversationId).filter(Boolean));
+    const more = (r.conversations||[]).filter(c=>!seen.has(c.conversationId));
+    ld.conversations = [...(ld.conversations||[]), ...more];
+    ld._page = r.page;
+    ld._hasMore = !!r.hasMore;
+    ld.totalContacts = r.totalContacts || ld.totalContacts;
+    ld.activeCount = (ld.activeCount||0) + (r.activeCount||0);
+  } catch(e) { /* ignore */ }
+  finally { _inboxLoadingMore = false; renderInbox(); }
 };
 
 let _inboxContactId = '';
@@ -477,7 +616,10 @@ const renderInboxDetail = () => {
   h += mkSec('Conversation', () => {
     let g = '<div class="dg">';
     g += `<div class="dk">Conversation ID</div><div class="dv">${esc(conv.id||convId)}</div>`;
-    g += `<div class="dk">Channels</div><div class="dv">${esc((conv.channels||[]).join(', '))}</div>`;
+    const chLabels = conv.channelLabels?.length ? conv.channelLabels.join(', ') : '';
+    const chRaw = (conv.channels||[]).join(', ');
+    g += `<div class="dk">Channels</div><div class="dv">${esc(chLabels || chRaw)}${chLabels && chRaw!==chLabels?` <span style="color:var(--txm)">(${esc(chRaw)})</span>`:''}</div>`;
+    if (conv.participantType) g += `<div class="dk">Participant Type</div><div class="dv">${esc(conv.participantType)}</div>`;
     if (conv.participantDisplayData) {
       const pd = conv.participantDisplayData;
       g += `<div class="dk">Participant</div><div class="dv">${esc(pd.name||'-')}</div>`;
@@ -487,7 +629,9 @@ const renderInboxDetail = () => {
       const bd = conv.businessDisplayData;
       g += `<div class="dk">Business</div><div class="dv">${esc(bd.name||'-')}</div>`;
     }
-    if (ld.lastMessageDate) g += `<div class="dk">Last Message</div><div class="dv">${esc(fmtDate(ld.lastMessageDate))}</div>`;
+    if (conv.createdDate) g += `<div class="dk">Created</div><div class="dv">${esc(fmtDate(conv.createdDate))}</div>`;
+    if (conv.lastActivityDate) g += `<div class="dk">Last Activity</div><div class="dv">${esc(fmtDate(conv.lastActivityDate))}</div>`;
+    if (conv.messageCount!=null) g += `<div class="dk">Message Count</div><div class="dv">${esc(conv.messageCount)}${ld.hasMoreMessages?'+':''}</div>`;
     g += '</div>';
     return g;
   }, true);
@@ -537,75 +681,121 @@ const renderInboxDetail = () => {
 
 const renderInboxMsgs = () => {
   const msgs = ld.messages || [];
-  const types = {};
-  msgs.forEach(m => { const t = m.contentType||'?'; types[t]=(types[t]||0)+1; });
+  const types = ld.typeBreakdown || {};
+  if (!Object.keys(types).length) {
+    msgs.forEach(m => { const t = m.contentType||'?'; types[t]=(types[t]||0)+1; });
+  }
   const typeStr = Object.entries(types).map(([k,v])=>`${k}: ${v}`).join(', ');
+  const fetchErr = ld.fetchErrors ? ' · ⚠ ' + Object.entries(ld.fetchErrors).map(([k,v])=>`${k}: ${v}`).join('; ') : '';
 
   const m = $('M');
   m.innerHTML = mkBc([{label:'Inbox',action:'back()'},{label:convId}])
-    + `<div class="tb"><span class="tb-t">Messages</span><span class="tb-c">${msgs.length} messages (${typeStr})</span></div>`;
+    + `<div class="tb"><span class="tb-t">Messages</span><span class="tb-c">${msgs.length} messages (${typeStr})${fetchErr}</span></div>`;
 
   let h = '<div class="msg-list">';
-  // 시간순 오름차순 (오래된 것 위, 새 것 아래 — 채팅 스레드 순서)
-  const sorted = [...msgs].sort((a,b) => (a.createdDate||'').localeCompare(b.createdDate||''));
+  // 시간 역순 (새 것 위, 오래된 것 아래)
+  const sorted = [...msgs].sort((a,b) => (b.createdDate||'').localeCompare(a.createdDate||''));
   sorted.forEach(msg => {
     const isIn = msg.direction === 'PARTICIPANT_TO_BUSINESS';
     const dir = isIn ? 'in' : 'out';
-    const senderLabel = isIn ? (msg.sender?.contactId ? 'Contact' : 'Visitor') : 'Business';
+    const senderTypeLabel = {CONTACT:'Contact',MEMBER:'Member',VISITOR:'Visitor',BUSINESS:'Business',APP:'App'}[msg.senderType] || (isIn?'Contact':'Business');
+    const senderName = msg.senderName || senderTypeLabel;
     const color = isIn ? '#45B7D1' : '#7B68EE';
     const init = isIn ? '←' : '→';
     const ct = msg.contentType || 'UNKNOWN';
+    const chLabel = msg.sourceChannelLabel || msg.sourceChannel || '';
 
     h += `<div class="msg-item ${dir}">`;
-    h += `<div class="msg-ava" style="background:${color}">${init}</div>`;
+    h += `<div class="msg-ava" style="background:${color}" title="${esc(senderTypeLabel)}">${init}</div>`;
     h += `<div class="msg-bubble">`;
 
-    // 유형별 렌더링
+    if (senderName && senderName !== senderTypeLabel) {
+      h += `<div class="msg-sender">${esc(senderName)} <span style="color:var(--txm);font-weight:400">· ${esc(senderTypeLabel)}</span></div>`;
+    }
+
+    // 유형별 렌더링 — displayText는 백엔드에서 contentType별 fallback 보장
+    const fallback = msg.displayText || msg.previewText || `[${ct}]`;
     switch(ct) {
       case 'BASIC':
-        h += `<div>${esc(msg.basicText || msg.previewText || '')}</div>`;
+        h += `<div>${esc(msg.basicText || fallback)}</div>`;
         break;
       case 'MINIMAL':
-        h += `<div class="msg-minimal">${esc(msg.previewText || '')}</div>`;
+        h += `<div class="msg-minimal">${esc(fallback)}</div>`;
         break;
       case 'FORM':
         h += `<div><strong>${esc(msg.formData?.title || 'Form')}</strong></div>`;
-        if (msg.formData?.fields) {
+        if (msg.formFields?.length) {
           h += '<div class="msg-form-fields">';
-          msg.formData.fields.forEach(f => {
+          msg.formFields.forEach(f => {
             h += `<div class="ff"><span class="ff-n">${esc(f.name||'')}</span><span class="ff-v">${esc(f.value||'')}</span></div>`;
           });
           h += '</div>';
+        } else {
+          h += `<div style="color:var(--txm);font-size:11px">${esc(fallback)}</div>`;
         }
         break;
       case 'TEMPLATE':
-        h += `<div>${esc(msg.previewText || 'Template message')}</div>`;
+        h += `<div>${esc(fallback)}</div>`;
+        break;
+      case 'SYSTEM':
+        h += `<div class="msg-minimal">⚙ ${esc(fallback)}</div>`;
         break;
       default:
-        h += `<div>${esc(msg.previewText || JSON.stringify(msg).slice(0,100))}</div>`;
+        h += `<div>${esc(fallback)}</div>`;
+    }
+
+    // 첨부파일 (이미지 썸네일 / 파일 링크)
+    if (msg.attachments?.length) {
+      h += '<div class="msg-att">';
+      msg.attachments.forEach(a => {
+        const url = a.url || '';
+        if (a.type === 'image' && url) {
+          h += `<a href="${esc(url)}" target="_blank" rel="noopener"><img class="a-img" src="${esc(url)}" alt="${esc(a.name||'image')}" loading="lazy"></a>`;
+        } else if (url) {
+          const sizeStr = a.size ? ` · ${fmtSize(a.size)}` : '';
+          h += `<a class="a-file" href="${esc(url)}" target="_blank" rel="noopener" download>${a.type==='video'?'🎬':'📎'} ${esc(a.name||'file')}${esc(sizeStr)}</a>`;
+        }
+      });
+      h += '</div>';
     }
 
     h += `<div class="msg-meta">`;
     h += `<span>${fmtDate(msg.createdDate)}</span>`;
     h += `<span class="msg-type">${esc(ct)}</span>`;
-    h += `<span>${esc(msg.sourceChannel||'')}</span>`;
-    h += `<span>${esc(senderLabel)}</span>`;
+    if (msg.visibility === 'BUSINESS') h += `<span class="msg-type" style="background:#f4e5b8;color:#8a6d00" title="비즈니스 전용(고객에게 미노출)">BUSINESS-only</span>`;
+    if (chLabel) h += `<span>${esc(chLabel)}</span>`;
+    h += `<span>${esc(senderTypeLabel)}</span>`;
+    (msg.badgeTypes||[]).forEach(b => {
+      const warn = /UNANSWER|PENDING/i.test(b);
+      h += `<span class="msg-bdg${warn?' warn':''}">${esc(b)}</span>`;
+    });
     h += `</div></div></div>`;
   });
 
-  if(ld.nextCursor) h += `<div style="text-align:center;padding:12px"><a style="cursor:pointer;color:var(--tx2)" onclick="loadMoreMsgs()">Load more...</a></div>`;
+  if(ld.nextCursor) h += `<div style="text-align:center;padding:12px"><a id="loadMoreBtn" style="cursor:pointer;color:var(--tx2)" onclick="loadMoreMsgs()">↓ Load older messages</a></div>`;
   h += '</div>';
   m.innerHTML += h;
 };
 
 const loadMoreMsgs = async () => {
-  if(!ld.nextCursor) return;
+  if(!ld.nextCursor || ld._loading) return;
+  ld._loading = true;
+  const btn = document.getElementById('loadMoreBtn');
+  if (btn) btn.textContent = 'Loading...';
   try {
-    const more = await api(`/api/inbox/conversations/${encodeURIComponent(convId)}/messages?limit=30&visibility=BUSINESS&cursor=${encodeURIComponent(ld.nextCursor)}`);
-    ld.messages = [...(ld.messages||[]), ...(more.messages||[])];
+    const more = await api(`/api/inbox/conversations/${encodeURIComponent(convId)}/messages?limit=50&visibility=ALL&sortOrder=DESC&cursor=${encodeURIComponent(ld.nextCursor)}`);
+    // dedupe by id
+    const seen = new Set((ld.messages||[]).map(m => m.id).filter(Boolean));
+    const merged = [...(ld.messages||[]), ...((more.messages||[]).filter(m => !seen.has(m.id)))];
+    ld.messages = merged;
     ld.nextCursor = more.nextCursor || '';
-    renderInboxMsgs();
+    // typeBreakdown 누적
+    if (more.typeBreakdown) {
+      ld.typeBreakdown = ld.typeBreakdown || {};
+      Object.entries(more.typeBreakdown).forEach(([k,v]) => { ld.typeBreakdown[k] = (ld.typeBreakdown[k]||0) + v; });
+    }
   } catch(e) { /* ignore */ }
+  finally { ld._loading = false; renderInboxMsgs(); }
 };
 
 /* ═══ Detail ═══ */
